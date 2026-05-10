@@ -18,6 +18,7 @@ celery==5.4.0
 # AI / LLM
 langchain==0.3.10
 langchain-google-genai==2.0.6
+langchain-ollama==0.3.3
 langgraph==0.2.59
 langgraph-checkpoint-postgres==2.0.10
 openai==1.57.0

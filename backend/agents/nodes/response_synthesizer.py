@@ -2,9 +2,8 @@
 from __future__ import annotations
 from typing import AsyncGenerator
 from agents.state import AgentState
-from core.config import settings
 from core.logging import logger
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
 
 _SYSTEM_PROMPT = """You are RAGAK, an AI financial assistant for Indian mutual fund investors.
@@ -29,12 +28,11 @@ Formatting (always use markdown):
 """
 
 
-def _get_llm(streaming: bool = False) -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.gemini_api_key,
+def _get_llm() -> ChatOllama:
+    return ChatOllama(
+        model="gemma3:4b",
+        base_url="http://host.docker.internal:11434",
         temperature=0.3,
-        streaming=streaming,
     )
 
 
@@ -82,7 +80,7 @@ async def stream_response(state: AgentState) -> AsyncGenerator[str, None]:
         return
 
     try:
-        llm = _get_llm(streaming=True)
+        llm = _get_llm()
         async for chunk in llm.astream([
             SystemMessage(content=_SYSTEM_PROMPT),
             HumanMessage(content=f"FINANCIAL CONTEXT:\n{context}\n\nUser Question: {query}"),

@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 import re
 from agents.state import AgentState
-from core.config import settings
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
 
 _INTENT_SYSTEM_PROMPT = """You are a financial intent classifier for an Indian mutual fund analysis platform.
@@ -53,11 +52,12 @@ def _extract_fund_names_regex(query: str) -> list[str]:
     return [m.strip() for m in matches]
 
 
-def _get_llm() -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.gemini_api_key,
+def _get_llm() -> ChatOllama:
+    return ChatOllama(
+        model="gemma3:4b",
+        base_url="http://host.docker.internal:11434",
         temperature=0,
+        format="json",
     )
 
 
@@ -70,7 +70,9 @@ async def intent_detector_node(state: AgentState) -> dict:
             SystemMessage(content=_INTENT_SYSTEM_PROMPT),
             HumanMessage(content=f"User query: {query}"),
         ])
-        data = json.loads(response.content)
+        # Strip Qwen3 thinking tokens before parsing JSON
+        raw = re.sub(r'<think>.*?</think>', '', response.content, flags=re.DOTALL).strip()
+        data = json.loads(raw)
         intent = data.get("intent", "general")
         fund_names = data.get("fund_names", [])
     except Exception:
