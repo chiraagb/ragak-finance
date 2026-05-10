@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from db.session import get_db
 from db.models.fund import Fund, FundCategory
 from db.models.fund_metric import MetricDefinition, FundMetric, FundCreditProfile, FundMaturityBucket, FundHolding
+from db.models.fund import FundSectorAllocation
 from api.dependencies import get_current_user
 from db.models.user import User
 
@@ -238,6 +239,44 @@ async def get_holdings(fund_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     )
     rows = result.scalars().all()
     return [{"name": h.instrument_name, "issuer": h.issuer_name, "rating": h.rating, "pct": float(h.percentage) if h.percentage else None, "type": h.instrument_type} for h in rows]
+
+
+@router.get("/{fund_id}/sectors")
+async def get_sector_allocation(fund_id: uuid.UUID, month: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    query = select(FundSectorAllocation).where(FundSectorAllocation.fund_id == fund_id)
+    if month:
+        from datetime import date as _date
+        try:
+            year, mo = month.split("-")
+            from calendar import monthrange
+            last_day = monthrange(int(year), int(mo))[1]
+            as_of = _date(int(year), int(mo), last_day)
+            query = query.where(FundSectorAllocation.as_of_date == as_of)
+        except Exception:
+            pass
+    query = query.order_by(FundSectorAllocation.as_of_date.desc(), FundSectorAllocation.percentage.desc()).limit(50)
+    result = await db.execute(query)
+    rows = result.scalars().all()
+    return [{"sector": r.sector_name, "percentage": float(r.percentage) if r.percentage else None, "as_of_date": r.as_of_date.isoformat()} for r in rows]
+
+
+@router.get("/{fund_id}/holdings/history")
+async def get_holdings_history(fund_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(FundHolding).where(FundHolding.fund_id == fund_id).order_by(FundHolding.as_of_date.desc(), FundHolding.percentage.desc())
+    )
+    rows = result.scalars().all()
+    history: dict[str, list] = {}
+    for h in rows:
+        key = h.as_of_date.isoformat()
+        history.setdefault(key, []).append({
+            "instrument_name": h.instrument_name,
+            "issuer": h.issuer_name,
+            "rating": h.rating,
+            "percentage": float(h.percentage) if h.percentage else None,
+            "type": h.instrument_type,
+        })
+    return history
 
 
 @router.post("/import/mfapi", status_code=200)

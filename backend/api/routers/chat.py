@@ -53,6 +53,7 @@ class SendMessageRequest(BaseModel):
 class CreateSessionRequest(BaseModel):
     session_name: Optional[str] = None
     active_profile_id: Optional[str] = None
+    active_fund_ids: Optional[list[str]] = None
 
 
 @router.post("/sessions", status_code=201)
@@ -67,6 +68,7 @@ async def create_session(
         session_name=body.session_name or "New Chat",
         langgraph_thread_id=thread_id,
         active_profile_id=uuid.UUID(body.active_profile_id) if body.active_profile_id else None,
+        active_fund_ids=[uuid.UUID(fid) for fid in body.active_fund_ids] if body.active_fund_ids else None,
     )
     db.add(session)
     await db.flush()
@@ -182,13 +184,14 @@ async def _run_and_stream(
             async def _run_graph(checkpointer):
                 nonlocal intent, confidence, sources, accumulated
                 graph = build_graph(db=stream_db, checkpointer=checkpointer)
+                pre_resolved_fund_ids = [str(fid) for fid in session.active_fund_ids] if session.active_fund_ids else []
                 initial_state = {
                     "user_query": content,
                     "session_id": str(session_id),
                     "user_id": str(user.id),
                     "active_profile_id": active_profile_id,
                     "extracted_fund_names": [],
-                    "extracted_fund_ids": [],
+                    "extracted_fund_ids": pre_resolved_fund_ids,
                     "rag_chunks": [],
                     "response_sources": [],
                     "retry_count": 0,

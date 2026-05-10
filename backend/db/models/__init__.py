@@ -1,5 +1,5 @@
 from db.models.user import User
-from db.models.fund import Fund, FundCategory, FundNavHistory
+from db.models.fund import Fund, FundCategory, FundNavHistory, FundSectorAllocation
 from db.models.fund_metric import MetricDefinition, FundMetric, FundCreditProfile, FundMaturityBucket, FundHolding
 from db.models.document import FundDocument
 from db.models.chunk import DocumentChunk
@@ -8,7 +8,7 @@ from db.models.chat import ChatSession, ChatMessage, ToolCallLog
 
 __all__ = [
     "User",
-    "Fund", "FundCategory", "FundNavHistory",
+    "Fund", "FundCategory", "FundNavHistory", "FundSectorAllocation",
     "MetricDefinition", "FundMetric", "FundCreditProfile", "FundMaturityBucket", "FundHolding",
     "FundDocument",
     "DocumentChunk",

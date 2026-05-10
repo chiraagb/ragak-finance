@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from processing.pdf_extractor import PageContent, detect_section
+from processing.section_classifier import classify_section, EMBEDDABLE_SECTIONS
 
 MAX_SECTION_TOKENS = 800
 MAX_CHUNK_TOKENS = 500
@@ -108,8 +109,12 @@ def chunk_pages(pages: list[PageContent], fund_name: Optional[str] = None, facts
             current_fund_name = detected
 
         prefix = _make_prefix(current_fund_name)
-        section_type = detect_section(page.text)
         section_heading = _extract_heading(page.text)
+        section_type = classify_section(section_heading or '', page.text)
+
+        # Only embed commentary and strategy sections; structured sections go to structured_extractor
+        if section_type not in EMBEDDABLE_SECTIONS:
+            continue
 
         if page.has_table and page.table_data:
             for table in page.table_data:

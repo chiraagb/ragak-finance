@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, date, timezone
 from decimal import Decimal
 from typing import Optional, List
-from sqlalchemy import String, Boolean, DateTime, Date, Numeric, Integer, Text, ForeignKey
+from sqlalchemy import String, Boolean, DateTime, Date, Numeric, Integer, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from db.base import Base
@@ -61,3 +61,15 @@ class FundNavHistory(Base):
     fund_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("funds.id", ondelete="CASCADE"), nullable=False)
     nav_date: Mapped[date] = mapped_column(Date, nullable=False)
     nav: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+
+
+class FundSectorAllocation(Base):
+    __tablename__ = "fund_sector_allocation"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fund_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("funds.id", ondelete="CASCADE"), nullable=False)
+    sector_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    percentage: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    __table_args__ = (UniqueConstraint("fund_id", "sector_name", "as_of_date", name="uq_sector_fund_date"),)

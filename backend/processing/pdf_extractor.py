@@ -20,6 +20,9 @@ SECTION_KEYWORDS: dict[str, list[str]] = {
     "performance": ["performance", "returns", "scheme returns", "benchmark returns"],
     "fund_info": ["fund details", "scheme details", "fund overview", "about the fund"],
     "overview": ["portfolio at a glance", "portfolio summary", "key facts"],
+    "commentary": ["fund manager commentary", "portfolio commentary", "market review", "market commentary"],
+    "investment_objective": ["investment objective", "scheme objective", "investment philosophy"],
+    "sector_allocation": ["sector allocation", "industry allocation", "sector exposure"],
 }
 
 
@@ -104,3 +107,25 @@ def detect_section(text: str) -> str:
         if any(kw in text_lower for kw in keywords):
             return section_type
     return "general"
+
+
+def extract_tables_camelot(pdf_path: str, page_num: int) -> list[list[str]]:
+    """Extract table rows from a single PDF page using Camelot.
+
+    Tries lattice (bordered tables) first, falls back to stream (whitespace-delimited).
+    Returns [] if Camelot is not installed or no tables are found.
+    """
+    try:
+        import camelot
+        tables = camelot.read_pdf(pdf_path, pages=str(page_num), flavor='lattice', suppress_stdout=True)
+        if not tables or tables.n == 0:
+            tables = camelot.read_pdf(pdf_path, pages=str(page_num), flavor='stream', suppress_stdout=True)
+        rows: list[list[str]] = []
+        for table in tables:
+            for row in table.df.values.tolist():
+                clean = [str(c).strip() for c in row if str(c).strip()]
+                if clean:
+                    rows.append(clean)
+        return rows
+    except Exception:
+        return []

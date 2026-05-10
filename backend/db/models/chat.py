@@ -15,6 +15,7 @@ class ChatSession(Base):
     session_name: Mapped[Optional[str]] = mapped_column(String(500))
     langgraph_thread_id: Mapped[Optional[str]] = mapped_column(String(200), unique=True)
     active_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("ranking_profiles.id"))
+    active_fund_ids: Mapped[Optional[list]] = mapped_column(ARRAY(UUID(as_uuid=True)))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

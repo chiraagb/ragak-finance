@@ -93,7 +93,6 @@ async def seed_extensions(session: AsyncSession) -> None:
 
 
 async def run_seed() -> None:
-    from processing.mfapi_importer import import_funds
     async with AsyncSessionLocal() as session:
         print("Creating extensions...")
         await seed_extensions(session)
@@ -102,17 +101,6 @@ async def run_seed() -> None:
         print("Seeding system ranking profiles...")
         await seed_profiles(session, metric_id_map)
         await session.commit()
-
-    # Import real funds from MFAPI.in in a fresh session (importer commits internally via flush)
-    async with AsyncSessionLocal() as session:
-        print("Importing liquid funds from MFAPI.in...")
-        result = await import_funds(
-            session,
-            categories=["liquid", "money_market", "overnight", "ultra_short", "low_duration"],
-            max_funds=300,
-        )
-        await session.commit()
-        print(f"MFAPI import done — imported={result['imported']} updated={result['updated']} errors={result['errors']}")
     print("Seed complete.")
 
 

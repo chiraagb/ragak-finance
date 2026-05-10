@@ -83,28 +83,36 @@ async def _process_document_async(document_id: uuid.UUID):
                 if fund:
                     fund_name = fund.name
 
+            # --- Pass 1: Embed only commentary/strategy sections ---
             chunks = chunk_pages(pages, fund_name=fund_name, factsheet_month=factsheet_month)
             logger.info("chunking_done", document_id=str(document_id), chunks=len(chunks))
 
-            texts_to_embed = [c.chunk_text for c in chunks]
-            embeddings = await get_embeddings_batch(texts_to_embed)
-            logger.info("embedding_done", document_id=str(document_id), count=len(embeddings))
+            if chunks:
+                texts_to_embed = [c.chunk_text for c in chunks]
+                embeddings = await get_embeddings_batch(texts_to_embed)
+                logger.info("embedding_done", document_id=str(document_id), count=len(embeddings))
+                for chunk, embedding in zip(chunks, embeddings):
+                    db_chunk = DocumentChunk(
+                        document_id=document_id,
+                        fund_id=fund_id,
+                        chunk_index=chunk.chunk_index,
+                        chunk_text=chunk.chunk_text,
+                        page_number=chunk.page_number,
+                        section_type=chunk.section_type,
+                        section_heading=chunk.section_heading,
+                        contains_table=chunk.contains_table,
+                        factsheet_month=factsheet_month,
+                        fund_name=chunk.fund_name or fund_name,
+                        embedding=embedding,
+                    )
+                    session.add(db_chunk)
 
-            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-                db_chunk = DocumentChunk(
-                    document_id=document_id,
-                    fund_id=fund_id,
-                    chunk_index=chunk.chunk_index,
-                    chunk_text=chunk.chunk_text,
-                    page_number=chunk.page_number,
-                    section_type=chunk.section_type,
-                    section_heading=chunk.section_heading,
-                    contains_table=chunk.contains_table,
-                    factsheet_month=factsheet_month,
-                    fund_name=chunk.fund_name or fund_name,
-                    embedding=embedding,
-                )
-                session.add(db_chunk)
+            # --- Pass 2: Extract structured data per scheme ---
+            from processing.section_classifier import classify_section
+            from processing.structured_extractor import (
+                extract_holdings, extract_sector_allocation,
+                store_holdings, store_sector_allocation,
+            )
 
             scheme_metrics = extract_metrics_per_scheme(pages, default_fund_name=fund_name)
             logger.info("metric_extract_done", document_id=str(document_id), schemes=len(scheme_metrics))
@@ -124,8 +132,7 @@ async def _process_document_async(document_id: uuid.UUID):
             from sqlalchemy import func
 
             for scheme_name, metrics in scheme_metrics.items():
-                # Resolve scheme name to a fund_id — fuzzy match on name
-                resolved_fund_id = fund_id  # default to doc's primary fund
+                resolved_fund_id = fund_id
                 if scheme_name and scheme_name != fund_name:
                     name_result = await session.execute(
                         select(Fund).where(
@@ -165,6 +172,19 @@ async def _process_document_async(document_id: uuid.UUID):
                             confidence=0.75,
                         )
                         session.add(fm)
+
+                # Extract and store holdings + sector allocation per scheme
+                for page in pages:
+                    section_heading = page.text.strip().split('\n')[0][:100] if page.text.strip() else ''
+                    section_type = classify_section(section_heading, page.text)
+                    if section_type == 'holdings':
+                        holdings = extract_holdings(page.text, doc.storage_path, page.page_number)
+                        if holdings:
+                            await store_holdings(session, resolved_fund_id, holdings, today)
+                    elif section_type == 'sector_allocation':
+                        sectors = extract_sector_allocation(page.text, doc.storage_path, page.page_number)
+                        if sectors:
+                            await store_sector_allocation(session, resolved_fund_id, sectors, today)
 
             doc.processing_status = "done"
             doc.processed_at = datetime.now(timezone.utc)
