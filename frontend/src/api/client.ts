@@ -24,45 +24,51 @@ api.interceptors.response.use(
   }
 )
 
-export async function streamChat(
-  sessionId: string,
-  content: string,
-  activeProfileId: string | null,
-  onToken: (delta: string) => void,
-  onToolCall: (tool: string) => void,
-  onDone: (payload: { intent: string; confidence: string; sources: unknown[] }) => void,
-) {
-  const token = localStorage.getItem('access_token')
-  const res = await fetch(`${BASE_URL}/api/chat/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ content, active_profile_id: activeProfileId }),
-  })
+type ChatHandlers = {
+  onToken: (delta: string) => void
+  onToolCall: (tool: string) => void
+  onDone: (payload: { intent: string; confidence: string; sources: unknown[] }) => void
+  onError?: (msg: string) => void
+}
 
-  if (!res.body) return
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
+export class ChatSocket {
+  private ws: WebSocket | null = null
+  private sessionId: string
+  private handlers: ChatHandlers
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-    let eventType = ''
-    for (const line of lines) {
-      if (line.startsWith('event: ')) {
-        eventType = line.slice(7).trim()
-      } else if (line.startsWith('data: ')) {
-        const data = JSON.parse(line.slice(6))
-        if (eventType === 'token') onToken(data.delta)
-        if (eventType === 'tool_call') onToolCall(data.tool)
-        if (eventType === 'done') onDone(data)
-      }
+  constructor(sessionId: string, handlers: ChatHandlers) {
+    this.sessionId = sessionId
+    this.handlers = handlers
+  }
+
+  connect() {
+    const token = localStorage.getItem('access_token')
+    const wsBase = BASE_URL.replace(/^http/, 'ws')
+    this.ws = new WebSocket(`${wsBase}/api/chat/sessions/${this.sessionId}/ws?token=${token}`)
+
+    this.ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data)
+      if (msg.type === 'token') this.handlers.onToken(msg.delta)
+      else if (msg.type === 'tool_call') this.handlers.onToolCall(msg.tool)
+      else if (msg.type === 'done') this.handlers.onDone(msg)
+      else if (msg.type === 'error') this.handlers.onError?.(msg.message)
     }
+
+    this.ws.onerror = () => this.handlers.onError?.('Connection error. Please try again.')
+  }
+
+  send(content: string, activeProfileId: string | null = null) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ content, active_profile_id: activeProfileId }))
+    }
+  }
+
+  disconnect() {
+    this.ws?.close()
+    this.ws = null
+  }
+
+  get isOpen() {
+    return this.ws?.readyState === WebSocket.OPEN
   }
 }

@@ -19,6 +19,7 @@ class FundDocument(Base):
     page_count: Mapped[Optional[int]] = mapped_column(Integer)
     document_type: Mapped[Optional[str]] = mapped_column(String(50))
     factsheet_month: Mapped[Optional[str]] = mapped_column(String(7))
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     processing_status: Mapped[str] = mapped_column(String(20), default="pending")
     processing_error: Mapped[Optional[str]] = mapped_column(Text)
     uploaded_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))

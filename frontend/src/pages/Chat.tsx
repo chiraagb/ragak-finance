@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
-import { streamChat, api } from '../api/client'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { ChatSocket, api } from '../api/client'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -17,17 +17,63 @@ export default function Chat() {
   const [toolStatus, setToolStatus] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const socketRef = useRef<ChatSocket | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, toolStatus])
 
-  const ensureSession = async () => {
-    if (sessionId) return sessionId
-    const res = await api.post('/api/chat/sessions', { session_name: 'New Chat' })
-    setSessionId(res.data.session_id)
-    return res.data.session_id as string
-  }
+  // Disconnect WebSocket on unmount
+  useEffect(() => {
+    return () => { socketRef.current?.disconnect() }
+  }, [])
+
+  const ensureSocket = useCallback(async (sid: string) => {
+    if (socketRef.current?.isOpen) return socketRef.current
+
+    const accumulated = { value: '' }
+
+    const socket = new ChatSocket(sid, {
+      onToken: (delta) => {
+        accumulated.value += delta
+        const val = accumulated.value
+        setMessages(prev => prev.map((m, i) =>
+          i === prev.length - 1 ? { ...m, content: val } : m
+        ))
+      },
+      onToolCall: (tool) => setToolStatus(_toolLabel(tool)),
+      onDone: (done) => {
+        setToolStatus(null)
+        setLoading(false)
+        accumulated.value = ''
+        setMessages(prev => prev.map((m, i) =>
+          i === prev.length - 1
+            ? { ...m, streaming: false, intent: done.intent, confidence: done.confidence, sources: done.sources as Message['sources'] }
+            : m
+        ))
+      },
+      onError: (msg) => {
+        setLoading(false)
+        setToolStatus(null)
+        setMessages(prev => prev.map((m, i) =>
+          i === prev.length - 1 ? { ...m, content: msg, streaming: false } : m
+        ))
+      },
+    })
+
+    socket.connect()
+    socketRef.current = socket
+
+    // Wait for connection to open
+    await new Promise<void>((resolve) => {
+      const check = setInterval(() => {
+        if (socket.isOpen) { clearInterval(check); resolve() }
+      }, 50)
+      setTimeout(() => { clearInterval(check); resolve() }, 3000)
+    })
+
+    return socket
+  }, [])
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return
@@ -38,35 +84,19 @@ export default function Chat() {
     setMessages(prev => [...prev, { role: 'assistant', content: '', streaming: true }])
 
     try {
-      const sid = await ensureSession()
-      let accumulated = ''
-      await streamChat(
-        sid,
-        userText,
-        null,
-        (delta) => {
-          accumulated += delta
-          setMessages(prev => prev.map((m, i) =>
-            i === prev.length - 1 ? { ...m, content: accumulated } : m
-          ))
-        },
-        (tool) => setToolStatus(_toolLabel(tool)),
-        (done) => {
-          setToolStatus(null)
-          setMessages(prev => prev.map((m, i) =>
-            i === prev.length - 1
-              ? { ...m, streaming: false, intent: done.intent, confidence: done.confidence, sources: done.sources as Message['sources'] }
-              : m
-          ))
-        },
-      )
+      let sid = sessionId
+      if (!sid) {
+        const res = await api.post('/api/chat/sessions', { session_name: 'New Chat' })
+        sid = res.data.session_id as string
+        setSessionId(sid)
+      }
+      const socket = await ensureSocket(sid)
+      socket.send(userText)
     } catch {
+      setLoading(false)
       setMessages(prev => prev.map((m, i) =>
         i === prev.length - 1 ? { ...m, content: "Couldn't connect. Please try again.", streaming: false } : m
       ))
-    } finally {
-      setLoading(false)
-      setToolStatus(null)
     }
   }
 

@@ -4,6 +4,8 @@ import json
 import re
 from agents.state import AgentState
 from core.config import settings
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 _INTENT_SYSTEM_PROMPT = """You are a financial intent classifier for an Indian mutual fund analysis platform.
 
@@ -51,19 +53,24 @@ def _extract_fund_names_regex(query: str) -> list[str]:
     return [m.strip() for m in matches]
 
 
+def _get_llm() -> ChatGoogleGenerativeAI:
+    return ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=settings.gemini_api_key,
+        temperature=0,
+    )
+
+
 async def intent_detector_node(state: AgentState) -> dict:
     query = state["user_query"]
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=settings.gemini_api_key)
-        model = genai.GenerativeModel("gemini-2.5-flash")
-
-        response = model.generate_content(
-            f"{_INTENT_SYSTEM_PROMPT}\n\nUser query: {query}",
-            generation_config={"response_mime_type": "application/json"},
-        )
-        data = json.loads(response.text)
+        llm = _get_llm()
+        response = await llm.ainvoke([
+            SystemMessage(content=_INTENT_SYSTEM_PROMPT),
+            HumanMessage(content=f"User query: {query}"),
+        ])
+        data = json.loads(response.content)
         intent = data.get("intent", "general")
         fund_names = data.get("fund_names", [])
     except Exception:

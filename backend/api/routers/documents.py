@@ -1,5 +1,6 @@
 """PDF upload and document management endpoints."""
 from __future__ import annotations
+import hashlib
 import os
 import uuid
 from typing import Optional
@@ -33,6 +34,17 @@ async def upload_document(
     if size_mb > settings.max_upload_size_mb:
         raise HTTPException(status_code=400, detail=f"File exceeds {settings.max_upload_size_mb}MB limit")
 
+    content_hash = hashlib.sha256(content).hexdigest()
+    existing = await db.execute(select(FundDocument).where(FundDocument.content_hash == content_hash))
+    duplicate = existing.scalar_one_or_none()
+    if duplicate:
+        return {
+            "document_id": str(duplicate.id),
+            "status": duplicate.processing_status,
+            "filename": duplicate.filename,
+            "duplicate": True,
+        }
+
     os.makedirs(settings.upload_dir, exist_ok=True)
     doc_id = uuid.uuid4()
     storage_path = os.path.join(settings.upload_dir, f"{doc_id}.pdf")
@@ -49,6 +61,7 @@ async def upload_document(
         document_type=document_type,
         processing_status="pending",
         uploaded_by=user.id,
+        content_hash=content_hash,
     )
     db.add(doc)
     await db.flush()

@@ -67,7 +67,10 @@ export default function Documents() {
     form.append('file', file)
     form.append('document_type', 'factsheet')
     try {
-      await api.post('/api/documents/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      const res = await api.post('/api/documents/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      if (res.data.duplicate) {
+        alert(`This file was already uploaded as "${res.data.filename}".`)
+      }
       await loadDocs()
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Upload failed')

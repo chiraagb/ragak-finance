@@ -1,9 +1,11 @@
-"""Response synthesizer: Gemini 2.5 Flash generates the final user-facing explanation."""
+"""Response synthesizer: LLM generates the final user-facing explanation."""
 from __future__ import annotations
 from typing import AsyncGenerator
 from agents.state import AgentState
 from core.config import settings
 from core.logging import logger
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 _SYSTEM_PROMPT = """You are RAGAK, an AI financial assistant for Indian mutual fund investors.
 
@@ -27,6 +29,15 @@ Formatting (always use markdown):
 """
 
 
+def _get_llm(streaming: bool = False) -> ChatGoogleGenerativeAI:
+    return ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=settings.gemini_api_key,
+        temperature=0.3,
+        streaming=streaming,
+    )
+
+
 async def response_synthesizer_node(state: AgentState) -> dict:
     query = state["user_query"]
     context = state.get("financial_context", "")
@@ -40,14 +51,13 @@ async def response_synthesizer_node(state: AgentState) -> dict:
             )
         }
 
-    prompt = f"{_SYSTEM_PROMPT}\n\nFINANCIAL CONTEXT:\n{context}\n\nUser Question: {query}\n\nAnswer:"
-
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=settings.gemini_api_key)
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(prompt)
-        answer = response.text
+        llm = _get_llm()
+        response = await llm.ainvoke([
+            SystemMessage(content=_SYSTEM_PROMPT),
+            HumanMessage(content=f"FINANCIAL CONTEXT:\n{context}\n\nUser Question: {query}"),
+        ])
+        answer = response.content
 
         if confidence == "low":
             answer += "\n\n*Note: Limited factsheet data was available for this response.*"
@@ -71,16 +81,14 @@ async def stream_response(state: AgentState) -> AsyncGenerator[str, None]:
         yield "I don't have enough factsheet data for this question. Please upload the relevant fund factsheet."
         return
 
-    prompt = f"{_SYSTEM_PROMPT}\n\nFINANCIAL CONTEXT:\n{context}\n\nUser Question: {query}\n\nAnswer:"
-
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=settings.gemini_api_key)
-        model = genai.GenerativeModel("gemini-2.5-flash")
-
-        for chunk in model.generate_content(prompt, stream=True):
-            if chunk.text:
-                yield chunk.text
+        llm = _get_llm(streaming=True)
+        async for chunk in llm.astream([
+            SystemMessage(content=_SYSTEM_PROMPT),
+            HumanMessage(content=f"FINANCIAL CONTEXT:\n{context}\n\nUser Question: {query}"),
+        ]):
+            if chunk.content:
+                yield chunk.content
 
     except Exception as e:
         logger.error("stream_synthesis_error", error=str(e))
