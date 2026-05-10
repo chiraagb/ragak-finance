@@ -1,0 +1,41 @@
+# Environment
+.env
+.env.local
+.env.*.local
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+
+# Uploads
+uploads/
+*.pdf
+
+# DB
+*.db
+*.sqlite
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Docker
+*.log
+
+# macOS
+.DS_Store
