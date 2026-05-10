@@ -1,34 +1,19 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
-
-interface Fund {
-  id: string
-  name: string
-  amc_name: string
-  category: string | null
-  aum_crores: number | null
-  expense_ratio: number | null
-  nav: number | null
-}
+import { useFunds } from '../hooks/useFunds'
 
 type SortKey = 'aum_crores' | 'expense_ratio' | 'name'
 type SortDir = 'asc' | 'desc'
 
 export default function FundDirectory() {
   const navigate = useNavigate()
-  const [funds, setFunds] = useState<Fund[]>([])
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [amcFilter, setAmcFilter] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('aum_crores')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
-  const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    setLoading(true)
-    api.get('/api/funds?limit=200').then(r => setFunds(r.data)).finally(() => setLoading(false))
-  }, [])
+  const { data: funds = [], isLoading: loading } = useFunds()
 
   const categories = useMemo(() => Array.from(new Set(funds.map(f => f.category).filter(Boolean))).sort() as string[], [funds])
   const amcs = useMemo(() => Array.from(new Set(funds.map(f => f.amc_name).filter(Boolean))).sort(), [funds])

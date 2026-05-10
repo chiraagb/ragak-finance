@@ -1,69 +1,44 @@
 import { useState, useEffect } from 'react'
-import { api } from '../api/client'
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Legend, Tooltip,
 } from 'recharts'
-
-interface FundSearchResult { id: string; scheme_code?: number; name: string; amc_name: string; has_local_data?: boolean }
-interface Profile { id: string; name: string }
-interface CompareRow {
-  fund_id: string; fund_name: string; total_score: number
-  breakdown: Record<string, { raw_value: number | null; normalized_score: number; weight: number; weighted_contribution: number; unit: string; higher_is_better: boolean }>
-}
+import { useRankingProfiles, useCompareFunds } from '../hooks/useRanking'
+import { useFundSearch } from '../hooks/useFunds'
+import type { FundSearchResult } from '../api/funds'
+import type { CompareRow } from '../api/ranking'
 
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 
 export default function Compare() {
   const [query, setQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<FundSearchResult[]>([])
   const [selected, setSelected] = useState<FundSearchResult[]>([])
-  const [profiles, setProfiles] = useState<Profile[]>([])
   const [profileId, setProfileId] = useState('')
-  const [comparison, setComparison] = useState<CompareRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const [searchLoading, setSearchLoading] = useState(false)
+
+  const { data: profiles = [] } = useRankingProfiles()
+  const { data: searchResults = [], isFetching: searchLoading } = useFundSearch(query, selected)
+  const compareMutation = useCompareFunds()
 
   useEffect(() => {
-    api.get('/api/ranking/profiles').then(r => {
-      setProfiles(r.data)
-      if (r.data.length > 0) setProfileId(r.data[0].id)
-    })
-  }, [])
-
-  useEffect(() => {
-    if (query.length < 2) { setSearchResults([]); return }
-    const t = setTimeout(() => {
-      setSearchLoading(true)
-      api.get(`/api/funds/search?q=${encodeURIComponent(query)}`)
-        .then(r => setSearchResults(r.data.filter((f: FundSearchResult) => !selected.find(s => s.id === f.id))))
-        .finally(() => setSearchLoading(false))
-    }, 300)
-    return () => clearTimeout(t)
-  }, [query, selected])
+    if (!profileId && profiles.length > 0) setProfileId(profiles[0].id)
+  }, [profiles, profileId])
 
   const addFund = (fund: FundSearchResult) => {
     if (selected.length >= 5 || selected.find(s => s.id === fund.id)) return
     setSelected(prev => [...prev, fund])
     setQuery('')
-    setSearchResults([])
   }
 
   const removeFund = (id: string) => setSelected(prev => prev.filter(f => f.id !== id))
 
-  const compare = async () => {
+  const compare = () => {
     if (selected.length < 2 || !profileId) return
-    setLoading(true)
-    try {
-      const ids = selected.map(f => f.id).join(',')
-      const res = await api.get(`/api/ranking/compare?fund_ids=${ids}&profile_id=${profileId}`)
-      setComparison(res.data)
-    } finally {
-      setLoading(false)
-    }
+    compareMutation.mutate({ fundIds: selected.map(f => f.id), profileId })
   }
 
-  // Build radar chart data from normalized scores
+  const comparison: CompareRow[] = compareMutation.data ?? []
+  const loading = compareMutation.isPending
+
   const radarData = comparison.length > 0
     ? Object.keys(comparison[0].breakdown).map(key => {
         const entry: Record<string, string | number> = { metric: key.replace(/_/g, ' ') }
@@ -72,7 +47,6 @@ export default function Compare() {
       })
     : []
 
-  // All metric keys for the comparison table
   const metricKeys = comparison.length > 0 ? Object.keys(comparison[0].breakdown) : []
 
   return (
@@ -138,7 +112,6 @@ export default function Compare() {
 
       {comparison.length > 0 && (
         <>
-          {/* Radar chart */}
           {radarData.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
               <h2 className="text-sm font-semibold text-gray-600 mb-3">Score Radar</h2>
@@ -158,7 +131,6 @@ export default function Compare() {
             </div>
           )}
 
-          {/* Score summary */}
           <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: `repeat(${comparison.length}, 1fr)` }}>
             {comparison.map((c, i) => (
               <div key={c.fund_id} className="bg-white rounded-xl border-2 p-4" style={{ borderColor: CHART_COLORS[i] }}>
@@ -171,7 +143,6 @@ export default function Compare() {
             ))}
           </div>
 
-          {/* Metric-by-metric table */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -186,10 +157,8 @@ export default function Compare() {
               </thead>
               <tbody>
                 {metricKeys.map(key => {
-                  const values = comparison.map(c => c.breakdown[key]?.raw_value)
                   const scores = comparison.map(c => c.breakdown[key]?.normalized_score ?? 0)
                   const bestIdx = scores.indexOf(Math.max(...scores))
-                  const higherIsBetter = comparison[0].breakdown[key]?.higher_is_better
                   return (
                     <tr key={key} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-2 text-gray-700 font-medium">{key.replace(/_/g, ' ')}</td>

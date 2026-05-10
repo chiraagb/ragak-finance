@@ -1,117 +1,28 @@
-import { useEffect, useState, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { Upload, Plus, Trash2, RefreshCw, PlayCircle, X } from 'lucide-react'
-import { api } from '../api/client'
-
-interface Doc {
-  id: string; filename: string; fund_id: string | null
-  status: 'pending' | 'processing' | 'done' | 'failed'
-  factsheet_month: string | null; page_count: number | null; uploaded_at: string
-}
-
-interface AMCSource {
-  id: string; amc_name: string; factsheet_url: string; is_active: boolean
-  last_fetched_at: string | null; last_fetch_status: string | null; last_fetch_error: string | null
-  last_document_id: string | null; created_at: string
-}
+import { useDocuments, useUploadDocument, useReprocessDocument, useDeleteDocument } from '../hooks/useDocuments'
+import { useAmcSources, useCreateAmcSource, useDeleteAmcSource, useFetchAmcSource, useFetchAllAmcSources } from '../hooks/useSources'
+import type { Doc } from '../api/documents'
 
 type Tab = 'uploads' | 'sources'
 
 export default function Documents() {
   const [tab, setTab] = useState<Tab>('uploads')
-
-  // --- uploads state ---
-  const [docs, setDocs] = useState<Doc[]>([])
-  const [uploading, setUploading] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  // --- AMC sources state ---
-  const [sources, setSources] = useState<AMCSource[]>([])
   const [newName, setNewName] = useState('')
   const [newUrl, setNewUrl] = useState('')
-  const [addingSource, setAddingSource] = useState(false)
-  const [fetchingAll, setFetchingAll] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
-  const loadDocs = () => api.get('/api/documents').then(r => setDocs(r.data))
-  const loadSources = () => api.get('/api/amc-sources').then(r => setSources(r.data))
+  const { data: docs = [] } = useDocuments()
+  const { data: sources = [] } = useAmcSources()
 
-  useEffect(() => { loadDocs(); loadSources() }, [])
+  const uploadMutation = useUploadDocument()
+  const reprocessMutation = useReprocessDocument()
+  const deleteDocMutation = useDeleteDocument()
 
-  useEffect(() => {
-    const pending = docs.some(d => d.status === 'pending' || d.status === 'processing')
-    if (!pending) return
-    const timer = setInterval(loadDocs, 3000)
-    return () => clearInterval(timer)
-  }, [docs])
-
-  // Poll sources while any are running
-  useEffect(() => {
-    const running = sources.some(s => s.last_fetch_status === 'running')
-    if (!running) return
-    const timer = setInterval(loadSources, 4000)
-    return () => clearInterval(timer)
-  }, [sources])
-
-  const reprocess = async (id: string) => {
-    await api.post(`/api/documents/${id}/reprocess`)
-    await loadDocs()
-  }
-
-  const deleteDoc = async (id: string) => {
-    await api.delete(`/api/documents/${id}`)
-    await loadDocs()
-  }
-
-  const upload = async (file: File) => {
-    setUploading(true)
-    const form = new FormData()
-    form.append('file', file)
-    form.append('document_type', 'factsheet')
-    try {
-      const res = await api.post('/api/documents/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
-      if (res.data.duplicate) {
-        alert(`This file was already uploaded as "${res.data.filename}".`)
-      }
-      await loadDocs()
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : 'Upload failed')
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const addSource = async () => {
-    if (!newName.trim() || !newUrl.trim()) return
-    setAddingSource(true)
-    try {
-      await api.post('/api/amc-sources', { amc_name: newName.trim(), factsheet_url: newUrl.trim() })
-      setNewName(''); setNewUrl('')
-      await loadSources()
-    } catch {
-      alert('Failed to add source')
-    } finally {
-      setAddingSource(false)
-    }
-  }
-
-  const deleteSource = async (id: string) => {
-    await api.delete(`/api/amc-sources/${id}`)
-    await loadSources()
-  }
-
-  const fetchSource = async (id: string) => {
-    await api.post(`/api/amc-sources/${id}/fetch`)
-    setSources(prev => prev.map(s => s.id === id ? { ...s, last_fetch_status: 'running' } : s))
-  }
-
-  const fetchAll = async () => {
-    setFetchingAll(true)
-    try {
-      await api.post('/api/amc-sources/fetch-all')
-      setSources(prev => prev.map(s => s.is_active ? { ...s, last_fetch_status: 'running' } : s))
-    } finally {
-      setFetchingAll(false)
-    }
-  }
+  const createSourceMutation = useCreateAmcSource()
+  const deleteSourceMutation = useDeleteAmcSource()
+  const fetchSourceMutation = useFetchAmcSource()
+  const fetchAllMutation = useFetchAllAmcSources()
 
   const statusBadge = (status: Doc['status']) => {
     const map: Record<Doc['status'], string> = {
@@ -131,6 +42,14 @@ export default function Documents() {
       running: 'bg-blue-100 text-blue-700',
     }
     return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[status] ?? 'bg-gray-100 text-gray-600'}`}>{status}</span>
+  }
+
+  const handleAddSource = () => {
+    if (!newName.trim() || !newUrl.trim()) return
+    createSourceMutation.mutate(
+      { amc_name: newName.trim(), factsheet_url: newUrl.trim() },
+      { onSuccess: () => { setNewName(''); setNewUrl('') } },
+    )
   }
 
   return (
@@ -157,14 +76,14 @@ export default function Documents() {
             <p className="text-sm text-gray-500">Manually upload a factsheet PDF to extract metrics.</p>
             <button
               onClick={() => fileRef.current?.click()}
-              disabled={uploading}
+              disabled={uploadMutation.isPending}
               className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               <Upload size={14} />
-              {uploading ? 'Uploading...' : 'Upload PDF'}
+              {uploadMutation.isPending ? 'Uploading...' : 'Upload PDF'}
             </button>
             <input ref={fileRef} type="file" accept=".pdf" className="hidden"
-              onChange={e => e.target.files?.[0] && upload(e.target.files[0])} />
+              onChange={e => e.target.files?.[0] && uploadMutation.mutate(e.target.files[0])} />
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -193,17 +112,15 @@ export default function Documents() {
                       <div className="flex items-center justify-end gap-2">
                         {(doc.status === 'failed' || doc.status === 'pending') && (
                           <button
-                            onClick={() => reprocess(doc.id)}
+                            onClick={() => reprocessMutation.mutate(doc.id)}
                             className="text-xs text-blue-600 hover:underline"
-                            title="Re-queue for processing"
                           >
                             Retry
                           </button>
                         )}
                         <button
-                          onClick={() => deleteDoc(doc.id)}
+                          onClick={() => deleteDocMutation.mutate(doc.id)}
                           className="text-red-400 hover:text-red-600 transition-colors"
-                          title="Delete document"
                         >
                           <X size={15} />
                         </button>
@@ -244,11 +161,11 @@ export default function Documents() {
                 placeholder="Factsheet PDF URL"
                 value={newUrl}
                 onChange={e => setNewUrl(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addSource()}
+                onKeyDown={e => e.key === 'Enter' && handleAddSource()}
               />
               <button
-                onClick={addSource}
-                disabled={addingSource || !newName.trim() || !newUrl.trim()}
+                onClick={handleAddSource}
+                disabled={createSourceMutation.isPending || !newName.trim() || !newUrl.trim()}
                 className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
                 <Plus size={14} />
@@ -259,12 +176,12 @@ export default function Documents() {
 
           <div className="flex justify-end mb-2">
             <button
-              onClick={fetchAll}
-              disabled={fetchingAll || sources.filter(s => s.is_active).length === 0}
+              onClick={() => fetchAllMutation.mutate()}
+              disabled={fetchAllMutation.isPending || sources.filter(s => s.is_active).length === 0}
               className="flex items-center gap-1.5 text-sm text-gray-600 border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
             >
               <RefreshCw size={13} />
-              {fetchingAll ? 'Queuing...' : `Fetch All (${sources.filter(s => s.is_active).length})`}
+              {fetchAllMutation.isPending ? 'Queuing...' : `Fetch All (${sources.filter(s => s.is_active).length})`}
             </button>
           </div>
 
@@ -295,9 +212,7 @@ export default function Documents() {
                       </a>
                     </td>
                     <td className="px-4 py-3 text-center text-gray-500 text-xs">
-                      {source.last_fetched_at
-                        ? new Date(source.last_fetched_at).toLocaleDateString('en-IN')
-                        : '—'}
+                      {source.last_fetched_at ? new Date(source.last_fetched_at).toLocaleDateString('en-IN') : '—'}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {fetchStatusBadge(source.last_fetch_status)}
@@ -310,7 +225,7 @@ export default function Documents() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => fetchSource(source.id)}
+                          onClick={() => fetchSourceMutation.mutate(source.id)}
                           disabled={source.last_fetch_status === 'running'}
                           className="text-blue-600 hover:text-blue-800 disabled:opacity-40 transition-colors"
                           title="Fetch now"
@@ -318,7 +233,7 @@ export default function Documents() {
                           <PlayCircle size={16} />
                         </button>
                         <button
-                          onClick={() => deleteSource(source.id)}
+                          onClick={() => deleteSourceMutation.mutate(source.id)}
                           className="text-red-400 hover:text-red-600 transition-colors"
                           title="Delete"
                         >

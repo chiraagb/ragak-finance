@@ -1,9 +1,14 @@
 import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   MessageSquare, Building2, GitCompare, BarChart3,
   FileText, TrendingUp, LogOut, SlidersHorizontal, ChevronRight,
 } from 'lucide-react'
 import { AuthProvider, useAuth } from './context/AuthContext'
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
+})
 import Login from './pages/Login'
 import Chat from './pages/Chat'
 import FundDirectory from './pages/FundDirectory'
@@ -127,12 +132,14 @@ function ProtectedLayout() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<LoginGuard />} />
-        <Route path="/*" element={<ProtectedLayout />} />
-      </Routes>
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginGuard />} />
+          <Route path="/*" element={<ProtectedLayout />} />
+        </Routes>
+      </AuthProvider>
+    </QueryClientProvider>
   )
 }
 

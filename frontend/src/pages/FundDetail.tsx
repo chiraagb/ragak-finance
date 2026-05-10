@@ -4,19 +4,11 @@ import {
   PieChart, Pie, Cell, Tooltip,
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { api, ChatSocket } from '../api/client'
+import { ChatSocket } from '../api/client'
+import { chatApi } from '../api/chat'
+import { useFund, useFundMetrics, useFundCredit, useFundMaturity, useFundHoldings, useFundSectors, useFundHoldingsHistory } from '../hooks/useFunds'
+import type { Holding } from '../api/funds'
 
-interface FundInfo {
-  id: string; name: string; amc_name: string; isin: string | null
-  nav: number | null; nav_date: string | null; aum_crores: number | null
-  expense_ratio: number | null; fund_manager: string | null
-  inception_date: string | null; benchmark_index: string | null; exit_load: string | null
-}
-interface Metric { key: string; display_name: string; value: number | null; unit: string; extraction_date: string }
-interface CreditRow { rating: string; percentage: number }
-interface MaturityRow { bucket: string; percentage: number }
-interface Holding { instrument_name: string | null; issuer: string | null; rating: string | null; percentage: number | null; type: string | null }
-interface SectorRow { sector: string; percentage: number }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; streaming?: boolean }
 
 const TABS = ['Overview', 'Performance', 'Portfolio', 'Commentary', 'Holdings Change'] as const
@@ -47,14 +39,6 @@ export default function FundDetail() {
   const { fundId } = useParams<{ fundId: string }>()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<Tab>('Overview')
-  const [fund, setFund] = useState<FundInfo | null>(null)
-  const [metrics, setMetrics] = useState<Metric[]>([])
-  const [credit, setCredit] = useState<CreditRow[]>([])
-  const [maturity, setMaturity] = useState<MaturityRow[]>([])
-  const [holdings, setHoldings] = useState<Holding[]>([])
-  const [sectors, setSectors] = useState<SectorRow[]>([])
-  const [holdingsHistory, setHoldingsHistory] = useState<Record<string, Holding[]>>({})
-  const [loading, setLoading] = useState(true)
 
   // Commentary chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -64,27 +48,13 @@ export default function FundDetail() {
   const chatSocketRef = useRef<ChatSocket | null>(null)
   const chatBottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!fundId) return
-    setLoading(true)
-    Promise.all([
-      api.get(`/api/funds/${fundId}`),
-      api.get(`/api/funds/${fundId}/metrics`),
-      api.get(`/api/funds/${fundId}/credit`),
-      api.get(`/api/funds/${fundId}/maturity`),
-      api.get(`/api/funds/${fundId}/holdings`),
-      api.get(`/api/funds/${fundId}/sectors`).catch(() => ({ data: [] })),
-      api.get(`/api/funds/${fundId}/holdings/history`).catch(() => ({ data: {} })),
-    ]).then(([f, m, c, mat, h, sec, hh]) => {
-      setFund(f.data)
-      setMetrics(m.data)
-      setCredit(c.data)
-      setMaturity(mat.data)
-      setHoldings(h.data)
-      setSectors(sec.data)
-      setHoldingsHistory(hh.data)
-    }).finally(() => setLoading(false))
-  }, [fundId])
+  const { data: fund, isLoading: loading } = useFund(fundId)
+  const { data: metrics = [] } = useFundMetrics(fundId)
+  const { data: credit = [] } = useFundCredit(fundId)
+  const { data: maturity = [] } = useFundMaturity(fundId)
+  const { data: holdings = [] } = useFundHoldings(fundId)
+  const { data: sectors = [] } = useFundSectors(fundId)
+  const { data: holdingsHistory = {} } = useFundHoldingsHistory(fundId)
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -132,11 +102,8 @@ export default function FundDetail() {
     try {
       let sid = chatSessionId
       if (!sid) {
-        const res = await api.post('/api/chat/sessions', {
-          session_name: `Commentary: ${fund?.name ?? fundId}`,
-          active_fund_ids: [fundId],
-        })
-        sid = res.data.session_id as string
+        const session = await chatApi.createSession(`Commentary: ${fund?.name ?? fundId}`, [fundId])
+        sid = session.session_id
         setChatSessionId(sid)
       }
       const socket = await ensureChatSocket(sid)

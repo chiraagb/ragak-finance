@@ -1,36 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { SlidersHorizontal } from 'lucide-react'
-import { api } from '../api/client'
-
-interface Profile { id: string; name: string; is_system: boolean }
-interface RankedFund {
-  rank: number; fund_id: string; fund_name: string; total_score: number
-  score_breakdown: Record<string, { weighted_contribution: number; weight: number; normalized_score: number; raw_value: number; unit: string }>
-}
+import { useRankingProfiles, useRankingScores } from '../hooks/useRanking'
 
 export default function Ranking() {
   const navigate = useNavigate()
-  const [profiles, setProfiles] = useState<Profile[]>([])
   const [selectedProfile, setSelectedProfile] = useState<string>('')
-  const [rankings, setRankings] = useState<RankedFund[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+
+  const { data: profiles = [] } = useRankingProfiles()
+  const { data: rankings = [], isLoading } = useRankingScores(selectedProfile)
 
   useEffect(() => {
-    api.get('/api/ranking/profiles').then(r => {
-      setProfiles(r.data)
-      if (r.data.length > 0) setSelectedProfile(r.data[0].id)
-    })
-  }, [])
-
-  useEffect(() => {
-    if (!selectedProfile) return
-    setLoading(true)
-    api.get(`/api/ranking/scores?profile_id=${selectedProfile}`)
-      .then(r => setRankings(r.data))
-      .finally(() => setLoading(false))
-  }, [selectedProfile])
+    if (!selectedProfile && profiles.length > 0) setSelectedProfile(profiles[0].id)
+  }, [profiles, selectedProfile])
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -55,7 +38,8 @@ export default function Ranking() {
           </button>
         </div>
       </div>
-      {loading ? <p className="text-gray-500 text-sm">Computing rankings...</p> : (
+
+      {isLoading ? <p className="text-gray-500 text-sm">Computing rankings...</p> : (
         <div className="space-y-2">
           {rankings.map(fund => (
             <div key={fund.fund_id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -109,7 +93,7 @@ export default function Ranking() {
               )}
             </div>
           ))}
-          {rankings.length === 0 && !loading && (
+          {rankings.length === 0 && !isLoading && (
             <div className="text-center text-gray-400 py-12">
               No rankings yet. Upload fund factsheets to get started.
             </div>
